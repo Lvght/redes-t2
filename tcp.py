@@ -1,5 +1,8 @@
 import asyncio
-from tcputils import *
+from grader.tcputils import *
+
+# Usado para gerar bytes aleatórios
+import os
 
 
 class Servidor:
@@ -37,6 +40,23 @@ class Servidor:
             conexao = self.conexoes[id_conexao] = Conexao(self, id_conexao)
             # TODO: você precisa fazer o handshake aceitando a conexão. Escolha se você acha melhor
             # fazer aqui mesmo ou dentro da classe Conexao.
+
+            ack_no: int = seq_no + 1
+
+            response = fix_checksum(
+                make_header(
+                    src_port=conexao.id_conexao[3],
+                    dst_port=conexao.id_conexao[1],
+                    seq_no=seq_no,
+                    ack_no=ack_no,
+                    flags=FLAGS_SYN | FLAGS_ACK
+                ),
+                dst_addr=conexao.id_conexao[2],
+                src_addr=conexao.id_conexao[0]
+            )
+
+            conexao.enviar(response)
+
             if self.callback:
                 self.callback(conexao)
         elif id_conexao in self.conexoes:
@@ -81,7 +101,8 @@ class Conexao:
         # TODO: implemente aqui o envio de dados.
         # Chame self.servidor.rede.enviar(segmento, dest_addr) para enviar o segmento
         # que você construir para a camada de rede.
-        pass
+
+        self.servidor.rede.enviar(dados, self.id_conexao[0])
 
     def fechar(self):
         """

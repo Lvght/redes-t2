@@ -1,2 +1,4 @@
 /grader
 __pycache__
+.idea/
+.vscode/
