@@ -93,7 +93,9 @@ class Servidor:
                 src_addr=conexao.id_conexao.endereco_destino
             )
 
-            conexao.enviar(response, )
+            # self.rede.servidor.enviar(response, conexao.id_conexao.endereco_origem)
+
+            conexao.enviar(response)
 
             if self.callback and not id_conexao.hash() in self.conexoes.keys():
                 self.callback(conexao)
@@ -163,6 +165,7 @@ class Conexao:
 
             self.servidor.rede.enviar(dados,
                                       self.id_conexao.endereco_origem)
+
             self.callback(self, b'')
 
         self.callback(self, payload)
