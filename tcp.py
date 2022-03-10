@@ -68,7 +68,7 @@ class Servidor:
             #  construtor de conexão
 
             conexao = self.conexoes[id_conexao.hash()] = \
-                Conexao(self, id_conexao, sequence_number=seq_no)
+                Conexao(self, id_conexao)
 
             # Registra a conexão no callback caso este não seja nulo.
             if self.callback:
@@ -78,7 +78,7 @@ class Servidor:
             #  Escolha se você acha melhor
             # fazer aqui mesmo ou dentro da classe Conexao.
 
-            ack_no: int = seq_no + 1
+            # ack_no: int = seq_no + 1
 
             # Prepara a resposta do servidor.
             response = fix_checksum(
@@ -86,14 +86,19 @@ class Servidor:
                     src_port=conexao.id_conexao.porta_destino,
                     dst_port=conexao.id_conexao.porta_origem,
                     seq_no=seq_no,
-                    ack_no=ack_no,
+                    ack_no=seq_no + 1,
                     flags=FLAGS_SYN | FLAGS_ACK
                 ),
                 dst_addr=conexao.id_conexao.endereco_origem,
                 src_addr=conexao.id_conexao.endereco_destino
             )
 
-            conexao.enviar(response, )
+            conexao.sequence_number = seq_no
+            conexao.ack_number = seq_no + 1
+            
+            self.conexoes[conexao.id_conexao.hash()] = conexao
+
+            conexao.enviar(response)
 
             if self.callback and not id_conexao.hash() in self.conexoes.keys():
                 self.callback(conexao)
@@ -114,14 +119,14 @@ class Conexao:
     acknowledge_number: int
     id_conexao: IdentificadorConexao
 
-    def __init__(self, servidor, id_conexao, sequence_number: int):
+    def __init__(self, servidor, id_conexao):
         self.servidor = servidor
         self.id_conexao = id_conexao
         self.callback = None
 
         # Usado para identificar a conexão.
-        self.sequence_number = sequence_number
-        self.acknowledge_number = sequence_number + 1
+        self.sequence_number = rand_num = random.randint(0, 0xffff)
+        self.acknowledge_number = self.sequence_number + 1
 
         self.timer = asyncio.get_event_loop().call_later(1,
                                                          self._exemplo_timer)  # um timer pode ser criado assim; esta linha é só um exemplo e pode ser removida
@@ -199,12 +204,35 @@ class Conexao:
         """
         Usado pela camada de aplicação para enviar dados
         """
-        # TODO: implemente aqui o envio de dados.
-        # Chame self.servidor.rede.enviar(segmento, dest_addr) para enviar o
-        # segmento
-        # que você construir para a camada de rede.
 
-        self.servidor.rede.enviar(dados, self.id_conexao.endereco_origem)
+        conexao_alvo = IdentificadorConexao((
+            self.id_conexao.endereco_destino,
+            self.id_conexao.porta_destino,
+            self.id_conexao.endereco_origem,
+            self.id_conexao.porta_origem
+        ))
+
+        header = read_header(dados)
+
+        if header[4] & FLAGS_SYN == FLAGS_SYN:
+            payload = dados
+
+        else:
+            payload = fix_checksum(
+                make_header(
+                    src_port=conexao_alvo.porta_origem,
+                    dst_port=conexao_alvo.porta_destino,
+                    seq_no=self.sequence_number + 1,
+                    ack_no=self.acknowledge_number + 1,
+                    flags=FLAGS_ACK
+                ) + dados,
+                conexao_alvo.endereco_origem,
+                conexao_alvo.endereco_destino
+            )
+
+        self.servidor.rede.enviar(payload, self.id_conexao.endereco_origem)
+
+        self.acknowledge_number = self.sequence_number + len(dados)
 
     def fechar(self):
         """
