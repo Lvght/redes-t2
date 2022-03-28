@@ -100,12 +100,14 @@ class Servidor:
             if self.callback and not id_conexao.hash() in self.conexoes.keys():
                 self.callback(conexao)
 
+        # FIXME Isso funciona?
         elif id_conexao.hash() in self.conexoes.keys():
             # Passa para a conexão adequada se ela já estiver estabelecida
 
             conexao: tcp.Conexao = self.conexoes[id_conexao.hash()]
 
             conexao._rdt_rcv(seq_no, ack_no, flags, payload)
+
         else:
             print('%s:%d -> %s:%d (pacote associado a conexão desconhecida)' %
                   (src_addr, src_port, dst_addr, dst_port))
@@ -136,6 +138,9 @@ class Conexao:
         print('Este é um exemplo de como fazer um timer')
 
     def _rdt_rcv(self, seq_no, ack_no, flags, payload):
+
+        # FIXME As flags devem ser tratadas aqui.
+
         # TODO: trate aqui o recebimento de segmentos provenientes da camada
         #  de rede.
         # Chame self.callback(self, dados) para passar dados para a camada
@@ -168,7 +173,26 @@ class Conexao:
 
             self.callback(self, b'')
 
+        if flags & (FLAGS_SYN | FLAGS_ACK) == (FLAGS_SYN | FLAGS_ACK):
+            dados = fix_checksum(
+                make_header(
+                    src_port=self.id_conexao.porta_destino,
+                    dst_port=self.id_conexao.porta_origem,
+                    seq_no=seq_no,
+                    ack_no=ack_no,
+                    flags=FLAGS_ACK
+                ),
+                dst_addr=self.id_conexao.endereco_destino,
+                src_addr=self.id_conexao.endereco_origem
+            )
+
+            self.servidor.rede.enviar(dados,
+                                      self.id_conexao.endereco_origem)
+
+            self.callback(self, b'')
+
         self.callback(self, payload)
+
         if len(payload) != 0:
             self.acknowledge_number += len(payload)
 
@@ -251,20 +275,47 @@ class Conexao:
         else:
             # self.acknowledge_number = self.sequence_number + 1
 
-            dados = fix_checksum(
+            # flags = read_header(dados)[4]
+
+            cabecalho = fix_checksum(
                 make_header(
                     src_port=self.id_conexao.porta_destino,
                     dst_port=self.id_conexao.porta_origem,
                     seq_no=self.sequence_number,
                     ack_no=self.acknowledge_number,
-                    flags=FLAGS_ACK | FLAGS_SYN
+                    flags=FLAGS_ACK
                 ),
                 dst_addr=self.id_conexao.endereco_origem,
                 src_addr=self.id_conexao.endereco_destino
             )
 
+            response: bytes
+
+            response = cabecalho + dados
+
+            # if flags & FLAGS_ACK == FLAGS_ACK:
+            #     response = dados
+            # else:
+            #     response = cabecalho
+
+
+
+
+
+            # dados = fix_checksum(
+            #     make_header(
+            #         src_port=self.id_conexao.porta_destino,
+            #         dst_port=self.id_conexao.porta_origem,
+            #         seq_no=self.sequence_number,
+            #         ack_no=self.acknowledge_number,
+            #         flags=FLAGS_ACK
+            #     ),
+            #     dst_addr=self.id_conexao.endereco_origem,
+            #     src_addr=self.id_conexao.endereco_destino
+            # )
+
             # NOTE: Enviar o cabeçalho quebra os testes 1 e 2.
-            self.servidor.rede.enviar(dados,
+            self.servidor.rede.enviar(response,
                                       self.id_conexao.endereco_origem)
 
             self.sequence_number = ++self.acknowledge_number
