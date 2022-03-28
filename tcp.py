@@ -212,11 +212,43 @@ class Conexao:
         # Se o tamanho dos dados for maior que o tamanho maximo (MSS),
         # quebre-o em dois envios
         if len(dados) > MSS:
-            self.enviar(dados[:MSS])
-            self.enviar(dados[MSS:])
+
+            splited_data: list = [dados[0:MSS], dados[MSS:]]
+
+            splited_data[0] = fix_checksum(
+                make_header(
+                    src_port=self.id_conexao.porta_destino,
+                    dst_port=self.id_conexao.porta_origem,
+                    seq_no=self.sequence_number,
+                    ack_no=self.acknowledge_number,
+                    flags=FLAGS_ACK | FLAGS_SYN
+                ),
+                dst_addr=self.id_conexao.endereco_origem,
+                src_addr=self.id_conexao.endereco_destino
+            )
+
+            splited_data[1] = fix_checksum(
+                make_header(
+                    src_port=self.id_conexao.porta_destino,
+                    dst_port=self.id_conexao.porta_origem,
+                    seq_no=self.sequence_number,
+                    ack_no=self.acknowledge_number,
+                    flags=FLAGS_ACK | FLAGS_SYN
+                ),
+                dst_addr=self.id_conexao.endereco_origem,
+                src_addr=self.id_conexao.endereco_destino
+            )
+
+            self.servidor.rede.enviar(splited_data[0],
+                                      self.id_conexao.endereco_origem)
+
+            self.servidor.rede.enviar(splited_data[1],
+                                      self.id_conexao.endereco_origem)
+
+            # self.enviar(dados[:MSS])
+            # self.enviar(dados[MSS:])
 
         else:
-
             # self.acknowledge_number = self.sequence_number + 1
 
             dados = fix_checksum(
@@ -225,16 +257,19 @@ class Conexao:
                     dst_port=self.id_conexao.porta_origem,
                     seq_no=self.sequence_number,
                     ack_no=self.acknowledge_number,
-                    flags=FLAGS_ACK
+                    flags=FLAGS_ACK | FLAGS_SYN
                 ),
                 dst_addr=self.id_conexao.endereco_origem,
                 src_addr=self.id_conexao.endereco_destino
             )
 
+            # NOTE: Enviar o cabeçalho quebra os testes 1 e 2.
             self.servidor.rede.enviar(dados,
                                       self.id_conexao.endereco_origem)
 
             self.sequence_number = ++self.acknowledge_number
+
+            print("kajdhsakjdhaj")
 
     def fechar(self):
         """
