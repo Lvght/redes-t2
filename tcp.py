@@ -3,8 +3,8 @@ import asyncio
 import tcp
 from grader.tcputils import *
 
+
 # Usado para gerar bytes aleatórios
-import os
 
 
 class IdentificadorConexao:
@@ -277,13 +277,19 @@ class Conexao:
 
             # flags = read_header(dados)[4]
 
+            # Quando a Flag é SYN, não há payload.
+
+            is_syn_plus_ack: bool = read_header(dados)[4] & (
+                        FLAGS_ACK | FLAGS_SYN) == (FLAGS_ACK | FLAGS_SYN)
+
             cabecalho = fix_checksum(
                 make_header(
                     src_port=self.id_conexao.porta_destino,
                     dst_port=self.id_conexao.porta_origem,
                     seq_no=self.sequence_number,
                     ack_no=self.acknowledge_number,
-                    flags=FLAGS_ACK
+                    flags=(
+                                FLAGS_SYN | FLAGS_ACK) if is_syn_plus_ack else FLAGS_ACK
                 ),
                 dst_addr=self.id_conexao.endereco_origem,
                 src_addr=self.id_conexao.endereco_destino
@@ -291,7 +297,7 @@ class Conexao:
 
             response: bytes
 
-            response = cabecalho + dados
+            response = cabecalho + dados if not is_syn_plus_ack else cabecalho
 
             # if flags & FLAGS_ACK == FLAGS_ACK:
             #     response = dados
