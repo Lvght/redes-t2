@@ -107,7 +107,6 @@ class Servidor:
             conexao: tcp.Conexao = self.conexoes[id_conexao.hash()]
 
             conexao._rdt_rcv(seq_no, ack_no, flags, payload)
-
         else:
             print('%s:%d -> %s:%d (pacote associado a conexão desconhecida)' %
                   (src_addr, src_port, dst_addr, dst_port))
@@ -191,7 +190,7 @@ class Conexao:
             self.servidor.rede.enviar(dados,
                                       self.id_conexao.endereco_origem)
 
-            self.callback(self, b'')
+            # self.callback(self, b'')
 
         self.callback(self, payload)
 
@@ -203,8 +202,8 @@ class Conexao:
                 make_header(
                     src_port=self.id_conexao.porta_destino,
                     dst_port=self.id_conexao.porta_origem,
-                    seq_no=ack_no,
-                    ack_no=seq_no,
+                    seq_no=self.sequence_number,
+                    ack_no=self.acknowledge_number,
                     flags=FLAGS_ACK
                 ),
                 dst_addr=self.id_conexao.endereco_origem,
@@ -256,7 +255,7 @@ class Conexao:
                         dst_port=self.id_conexao.porta_origem,
                         seq_no=self.sequence_number,
                         ack_no=self.acknowledge_number,
-                        flags=FLAGS_ACK | FLAGS_SYN
+                        flags=FLAGS_ACK # | FLAGS_SYN
                     ),
                     dst_addr=self.id_conexao.endereco_origem,
                     src_addr=self.id_conexao.endereco_destino
@@ -316,8 +315,7 @@ class Conexao:
                     dst_port=self.id_conexao.porta_origem,
                     seq_no=self.sequence_number,
                     ack_no=self.acknowledge_number,
-                    flags=(
-                                FLAGS_SYN | FLAGS_ACK) if is_syn_plus_ack else FLAGS_ACK
+                    flags=(FLAGS_SYN | FLAGS_ACK) if is_syn_plus_ack else FLAGS_ACK
                 ),
                 dst_addr=self.id_conexao.endereco_origem,
                 src_addr=self.id_conexao.endereco_destino
