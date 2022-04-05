@@ -159,8 +159,8 @@ class Conexao:
                 make_header(
                     src_port=self.id_conexao.porta_destino,
                     dst_port=self.id_conexao.porta_origem,
-                    seq_no=seq_no,
-                    ack_no=ack_no,
+                    seq_no=self.sequence_number,
+                    ack_no=self.sequence_number + 1,
                     flags=FLAGS_ACK
                 ),
                 dst_addr=self.id_conexao.endereco_destino,
@@ -358,5 +358,20 @@ class Conexao:
         """
         Usado pela camada de aplicação para fechar a conexão
         """
-        # TODO: implemente aqui o fechamento de conexão
-        pass
+
+        # Remove a conexão da lista de conexões ativas.
+        self.servidor.conexoes.pop(self.id_conexao.hash())
+
+        header = fix_checksum(
+            make_header(
+                src_port=self.id_conexao.porta_origem,
+                dst_port=self.id_conexao.porta_destino,
+                seq_no=self.sequence_number,
+                ack_no=self.acknowledge_number,
+                flags=FLAGS_FIN
+            ),
+            src_addr=self.id_conexao.endereco_origem,
+            dst_addr=self.id_conexao.endereco_destino
+        )
+
+        self.servidor.rede.enviar(header, self.id_conexao.endereco_destino)
