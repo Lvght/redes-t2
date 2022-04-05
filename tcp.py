@@ -178,6 +178,8 @@ class Conexao:
                 make_header(
                     src_port=self.id_conexao.porta_destino,
                     dst_port=self.id_conexao.porta_origem,
+
+                    # TODO Isso tá estranho
                     seq_no=seq_no,
                     ack_no=ack_no,
                     flags=FLAGS_ACK
@@ -195,23 +197,27 @@ class Conexao:
 
         if len(payload) != 0:
             self.acknowledge_number += len(payload)
+            self.sequence_number = ack_no
 
-            dados = fix_checksum(
+            header = fix_checksum(
                 make_header(
                     src_port=self.id_conexao.porta_destino,
                     dst_port=self.id_conexao.porta_origem,
-                    seq_no=self.sequence_number,
-                    ack_no=self.acknowledge_number,
-                    flags=flags | FLAGS_ACK
+                    seq_no=ack_no,
+                    ack_no=seq_no,
+                    flags=FLAGS_ACK
                 ),
                 dst_addr=self.id_conexao.endereco_origem,
                 src_addr=self.id_conexao.endereco_destino
             )
 
-            self.servidor.rede.enviar(dados,
-                                      self.id_conexao.endereco_origem)
+            should_send_payload: bool = not (flags & FLAGS_ACK) == FLAGS_ACK
 
-            self.sequence_number += len(dados)
+            self.servidor.rede.enviar(
+                header + payload if should_send_payload else header,
+                self.id_conexao.endereco_origem)
+
+            # self.sequence_number += len(dados)
             # print('recebido payload: %r' % payload)
 
     # Os métodos abaixo fazem parte da API
@@ -237,37 +243,59 @@ class Conexao:
         # quebre-o em dois envios
         if len(dados) > MSS:
 
-            splited_data: list = [dados[0:MSS], dados[MSS:]]
+            splited_data: list = []
 
-            splited_data[0] = fix_checksum(
-                make_header(
-                    src_port=self.id_conexao.porta_destino,
-                    dst_port=self.id_conexao.porta_origem,
-                    seq_no=self.sequence_number,
-                    ack_no=self.acknowledge_number,
-                    flags=FLAGS_ACK | FLAGS_SYN
-                ),
-                dst_addr=self.id_conexao.endereco_origem,
-                src_addr=self.id_conexao.endereco_destino
-            )
+            while len(dados) >= MSS:
+                splited_data.append(dados[:MSS])
+                dados = dados[MSS:]
 
-            splited_data[1] = fix_checksum(
-                make_header(
-                    src_port=self.id_conexao.porta_destino,
-                    dst_port=self.id_conexao.porta_origem,
-                    seq_no=self.sequence_number,
-                    ack_no=self.acknowledge_number,
-                    flags=FLAGS_ACK | FLAGS_SYN
-                ),
-                dst_addr=self.id_conexao.endereco_origem,
-                src_addr=self.id_conexao.endereco_destino
-            )
+            for payload in splited_data:
+                header = fix_checksum(
+                    make_header(
+                        src_port=self.id_conexao.porta_destino,
+                        dst_port=self.id_conexao.porta_origem,
+                        seq_no=self.sequence_number,
+                        ack_no=self.acknowledge_number,
+                        flags=FLAGS_ACK | FLAGS_SYN
+                    ),
+                    dst_addr=self.id_conexao.endereco_origem,
+                    src_addr=self.id_conexao.endereco_destino
+                )
 
-            self.servidor.rede.enviar(splited_data[0],
-                                      self.id_conexao.endereco_origem)
+                self.servidor.rede.enviar(header + payload,
+                                          self.id_conexao.endereco_origem)
 
-            self.servidor.rede.enviar(splited_data[1],
-                                      self.id_conexao.endereco_origem)
+                self.sequence_number += len(payload)
+
+            # splited_data[0] = fix_checksum(
+            #     make_header(
+            #         src_port=self.id_conexao.porta_destino,
+            #         dst_port=self.id_conexao.porta_origem,
+            #         seq_no=self.sequence_number,
+            #         ack_no=self.acknowledge_number,
+            #         flags=FLAGS_ACK | FLAGS_SYN
+            #     ),
+            #     dst_addr=self.id_conexao.endereco_origem,
+            #     src_addr=self.id_conexao.endereco_destino
+            # )
+            #
+            # splited_data[1] = fix_checksum(
+            #     make_header(
+            #         src_port=self.id_conexao.porta_destino,
+            #         dst_port=self.id_conexao.porta_origem,
+            #         seq_no=self.sequence_number,
+            #         ack_no=self.acknowledge_number,
+            #         flags=FLAGS_ACK | FLAGS_SYN
+            #     ),
+            #     dst_addr=self.id_conexao.endereco_origem,
+            #     src_addr=self.id_conexao.endereco_destino
+            # )
+            #
+            # self.servidor.rede.enviar(splited_data[0],
+            #                           self.id_conexao.endereco_origem)
+            #
+            # self.servidor.rede.enviar(splited_data[1],
+            #                           self.id_conexao.endereco_origem)
 
             # self.enviar(dados[:MSS])
             # self.enviar(dados[MSS:])
