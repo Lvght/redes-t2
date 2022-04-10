@@ -160,13 +160,18 @@ class Conexao:
                 self.buffer[-1]))
 
             # Get ACK and Seq_no from read_header of buffer[0]
-            _, _, seq_no, ack_no, _, _, _, _ = read_header(self.buffer[0])
+            _, _, seq_no, ack_no, _, _, _, _ = read_header(self.buffer[-1])
 
             print('seq_no: {}'.format(seq_no))
             print('ack_no: {}'.format(ack_no))
 
-            self.servidor.rede.enviar(self.buffer[0],
-                                      self.id_conexao.endereco_origem)
+            self.servidor.rede.enviar(
+                self.buffer[-1], self.id_conexao.endereco_origem)
+
+            self.sequence_number += len(self.buffer[-1]) - 20
+
+            # self.sequence_number += len(self.buffer[0]) - 20
+            self.buffer.clear()
 
             # payload = self.buffer.pop()
             # self.servidor.rede.enviar(payload,
@@ -203,6 +208,15 @@ class Conexao:
         if seq_no != self.acknowledge_number:
             return
 
+        if self.buffer:
+            if self.sequence_number + (len(self.buffer[0]) - 20) == ack_no:
+                self.sequence_number += len(self.buffer[0]) - 20
+
+                self.buffer.pop()
+
+                if len(self.buffer) == 0:
+                    self.stop_timer()
+
         if seq_no > self.sequence_number - 1 and (
                 # if self.sequence_number <= seq_no and (
                 flags & FLAGS_ACK) == FLAGS_ACK:
@@ -211,7 +225,7 @@ class Conexao:
             self.sequence_number = seq_no
 
             if len(self.buffer) > 0:
-                self.buffer.pop(0)
+                self.buffer.pop()
                 if len(self.buffer) == 0:
                     self.stop_timer()
                 else:
@@ -375,6 +389,7 @@ class Conexao:
             self.sequence_number = ++self.acknowledge_number
             print(' + Seq number updated to %r' % self.sequence_number)
 
+            print(' /!\\ Appending to buffer: %r' % response)
             self.buffer.append(response)
 
             # Inicia o timer (caso isso já não tenha sido feito).
