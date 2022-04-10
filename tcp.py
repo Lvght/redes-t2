@@ -1,4 +1,6 @@
 import asyncio
+from datetime import datetime
+from typing import List
 
 import tcp
 from grader.tcputils import *
@@ -28,11 +30,15 @@ class IdentificadorConexao:
 
 
 class Servidor:
+
     def __init__(self, rede, porta):
         self.rede = rede
         self.porta = porta
         self.conexoes = {}
         self.callback = None
+
+        timers: list = []
+
         self.rede.registrar_recebedor(self._rdt_rcv)
 
     def registrar_monitor_de_conexoes_aceitas(self, callback):
@@ -93,7 +99,8 @@ class Servidor:
                 src_addr=conexao.id_conexao.endereco_destino
             )
 
-            # self.rede.servidor.enviar(response, conexao.id_conexao.endereco_origem)
+            # self.rede.servidor.enviar(response,
+            # conexao.id_conexao.endereco_origem)
 
             conexao.enviar(response)
 
@@ -116,27 +123,73 @@ class Conexao:
     sequence_number: int
     acknowledge_number: int
     id_conexao: IdentificadorConexao
+    asyncio_delay_time: float = 0.1
+
+    # Mantém um timer interno.
+    timer = None
+
+    # Buffer de dados.
+    buffer: List[bytes] = []
+
+    # Registro de todos os timestamps de envio.
+    sent_timestamp_log: List[datetime] = []
 
     def __init__(self, servidor, id_conexao, sequence_number: int):
         self.servidor = servidor
         self.id_conexao = id_conexao
         self.callback = None
 
+        self.buffer = []
+        self.sent_timestamp_log = []
+
         # Usado para identificar a conexão.
         self.sequence_number = sequence_number
         self.acknowledge_number = sequence_number + 1
 
-        self.timer = asyncio.get_event_loop().call_later(1,
-                                                         self._exemplo_timer)  # um timer pode ser criado assim; esta linha é só um exemplo e pode ser removida
-
+        # self.timer = asyncio.get_event_loop().call_later(
+        #     1, self._exemplo_timer
+        # )
         # self.timer.cancel()   # é possível cancelar o timer chamando esse
         # método; esta linha é só um exemplo e pode ser removida
 
-    def _exemplo_timer(self):
-        # Esta função é só um exemplo e pode ser removida
-        print('Este é um exemplo de como fazer um timer')
+    def _timer_callback(self):
+        print('[{}] timer callback called'.format(datetime.now()))
+
+        if self.buffer:
+            print('Sending the following data (from buffer): {}'.format(
+                self.buffer[-1]))
+
+            # Get ACK and Seq_no from read_header of buffer[0]
+            _, _, seq_no, ack_no, _, _, _, _ = read_header(self.buffer[0])
+
+            print('seq_no: {}'.format(seq_no))
+            print('ack_no: {}'.format(ack_no))
+
+            self.servidor.rede.enviar(self.buffer[0],
+                                      self.id_conexao.endereco_origem)
+
+            # payload = self.buffer.pop()
+            # self.servidor.rede.enviar(payload,
+            # self.id_conexao.endereco_destino)
+        else:
+            self.stop_timer()
+
+        self.sent_timestamp_log.append(datetime.now())
+
+    def start_timer(self):
+        # self.stop_timer()
+        self.timer = asyncio.get_event_loop().call_later(
+            self.asyncio_delay_time, self._timer_callback)
+
+    def stop_timer(self):
+        if self.timer:
+            self.timer.cancel()
+            self.timer = None
 
     def _rdt_rcv(self, seq_no, ack_no, flags, payload):
+        asyncio.get_event_loop().call_later(
+            self.asyncio_delay_time, self._timer_callback
+        )
 
         # FIXME As flags devem ser tratadas aqui.
 
@@ -150,11 +203,24 @@ class Conexao:
         if seq_no != self.acknowledge_number:
             return
 
+        if seq_no > self.sequence_number - 1 and (
+                # if self.sequence_number <= seq_no and (
+                flags & FLAGS_ACK) == FLAGS_ACK:
+            # self.start_timer()
+
+            self.sequence_number = seq_no
+
+            if len(self.buffer) > 0:
+                self.buffer.pop(0)
+                if len(self.buffer) == 0:
+                    self.stop_timer()
+                else:
+                    self.start_timer()
+
         if flags & FLAGS_FIN == FLAGS_FIN:
             self.acknowledge_number += 1
 
             # Envia a confirmação de recebimento com a flag ACK.
-
             dados = fix_checksum(
                 make_header(
                     src_port=self.id_conexao.porta_destino,
@@ -167,8 +233,8 @@ class Conexao:
                 src_addr=self.id_conexao.endereco_origem
             )
 
-            self.servidor.rede.enviar(dados,
-                                      self.id_conexao.endereco_origem)
+            self.servidor.rede.enviar(
+                dados, self.id_conexao.endereco_origem)
 
             self.callback(self, b'')
 
@@ -187,8 +253,8 @@ class Conexao:
                 src_addr=self.id_conexao.endereco_origem
             )
 
-            self.servidor.rede.enviar(dados,
-                                      self.id_conexao.endereco_origem)
+            self.servidor.rede.enviar(
+                dados, self.id_conexao.endereco_origem)
 
             # self.callback(self, b'')
 
@@ -244,9 +310,13 @@ class Conexao:
 
             splited_data: list = []
 
+            # Dados excedem o limite permitido.
             while len(dados) >= MSS:
                 splited_data.append(dados[:MSS])
                 dados = dados[MSS:]
+
+            # Inicializa o timer antes do envio de todos os pacotes.
+            self.start_timer()
 
             for payload in splited_data:
                 header = fix_checksum(
@@ -255,59 +325,31 @@ class Conexao:
                         dst_port=self.id_conexao.porta_origem,
                         seq_no=self.sequence_number,
                         ack_no=self.acknowledge_number,
-                        flags=FLAGS_ACK # | FLAGS_SYN
+                        flags=FLAGS_ACK  # | FLAGS_SYN
                     ),
                     dst_addr=self.id_conexao.endereco_origem,
                     src_addr=self.id_conexao.endereco_destino
                 )
 
-                self.servidor.rede.enviar(header + payload,
-                                          self.id_conexao.endereco_origem)
+                print(
+                    'Sending the following payload (from Conn.enviar): %r' %
+                    payload)
+
+                print('Ack: %r' % self.acknowledge_number)
+                print('Seq: %r' % self.sequence_number)
+
+                self.servidor.rede.enviar(
+                    header + payload, self.id_conexao.endereco_origem)
 
                 self.sequence_number += len(payload)
 
-            # splited_data[0] = fix_checksum(
-            #     make_header(
-            #         src_port=self.id_conexao.porta_destino,
-            #         dst_port=self.id_conexao.porta_origem,
-            #         seq_no=self.sequence_number,
-            #         ack_no=self.acknowledge_number,
-            #         flags=FLAGS_ACK | FLAGS_SYN
-            #     ),
-            #     dst_addr=self.id_conexao.endereco_origem,
-            #     src_addr=self.id_conexao.endereco_destino
-            # )
-            #
-            # splited_data[1] = fix_checksum(
-            #     make_header(
-            #         src_port=self.id_conexao.porta_destino,
-            #         dst_port=self.id_conexao.porta_origem,
-            #         seq_no=self.sequence_number,
-            #         ack_no=self.acknowledge_number,
-            #         flags=FLAGS_ACK | FLAGS_SYN
-            #     ),
-            #     dst_addr=self.id_conexao.endereco_origem,
-            #     src_addr=self.id_conexao.endereco_destino
-            # )
-            #
-            # self.servidor.rede.enviar(splited_data[0],
-            #                           self.id_conexao.endereco_origem)
-            #
-            # self.servidor.rede.enviar(splited_data[1],
-            #                           self.id_conexao.endereco_origem)
+                print(' + Seq number updated to %r' % self.sequence_number)
 
-            # self.enviar(dados[:MSS])
-            # self.enviar(dados[MSS:])
+                self.buffer.append(header + payload)
 
         else:
-            # self.acknowledge_number = self.sequence_number + 1
-
-            # flags = read_header(dados)[4]
-
-            # Quando a Flag é SYN, não há payload.
-
             is_syn_plus_ack: bool = read_header(dados)[4] & (
-                        FLAGS_ACK | FLAGS_SYN) == (FLAGS_ACK | FLAGS_SYN)
+                    FLAGS_ACK | FLAGS_SYN) == (FLAGS_ACK | FLAGS_SYN)
 
             cabecalho = fix_checksum(
                 make_header(
@@ -315,44 +357,29 @@ class Conexao:
                     dst_port=self.id_conexao.porta_origem,
                     seq_no=self.sequence_number,
                     ack_no=self.acknowledge_number,
-                    flags=(FLAGS_SYN | FLAGS_ACK) if is_syn_plus_ack else FLAGS_ACK
+                    flags=(
+                            FLAGS_SYN | FLAGS_ACK) if is_syn_plus_ack
+                    else FLAGS_ACK
                 ),
                 dst_addr=self.id_conexao.endereco_origem,
                 src_addr=self.id_conexao.endereco_destino
             )
 
             response: bytes
-
             response = cabecalho + dados if not is_syn_plus_ack else cabecalho
 
-            # if flags & FLAGS_ACK == FLAGS_ACK:
-            #     response = dados
-            # else:
-            #     response = cabecalho
-
-
-
-
-
-            # dados = fix_checksum(
-            #     make_header(
-            #         src_port=self.id_conexao.porta_destino,
-            #         dst_port=self.id_conexao.porta_origem,
-            #         seq_no=self.sequence_number,
-            #         ack_no=self.acknowledge_number,
-            #         flags=FLAGS_ACK
-            #     ),
-            #     dst_addr=self.id_conexao.endereco_origem,
-            #     src_addr=self.id_conexao.endereco_destino
-            # )
-
             # NOTE: Enviar o cabeçalho quebra os testes 1 e 2.
-            self.servidor.rede.enviar(response,
-                                      self.id_conexao.endereco_origem)
+            self.servidor.rede.enviar(
+                response, self.id_conexao.endereco_origem)
 
             self.sequence_number = ++self.acknowledge_number
+            print(' + Seq number updated to %r' % self.sequence_number)
 
-            print("kajdhsakjdhaj")
+            self.buffer.append(response)
+
+            # Inicia o timer (caso isso já não tenha sido feito).
+            if not self.timer:
+                self.start_timer()
 
     def fechar(self):
         """
