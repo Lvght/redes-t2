@@ -52,6 +52,9 @@ class Servidor:
         src_port, dst_port, seq_no, ack_no, \
         flags, window_size, checksum, urg_ptr = read_header(segment)
 
+        print('ℹ️ Called server _rdt_rcv with segment of length {}'.format(
+            len(segment)))
+
         if dst_port != self.porta:
             # Ignora segmentos que não são destinados à porta do nosso servidor
             return
@@ -61,6 +64,9 @@ class Servidor:
             return
 
         payload = segment[4 * (flags >> 12):]
+
+        print('ℹ️ Called server _rdt_rcv with payload of length {}'.format(
+            len(payload)))
 
         # Obtém os dados da conexão.
         id_conexao = IdentificadorConexao(
@@ -99,20 +105,14 @@ class Servidor:
                 src_addr=conexao.id_conexao.endereco_destino
             )
 
-            # self.rede.servidor.enviar(response,
-            # conexao.id_conexao.endereco_origem)
-
             conexao.enviar(response)
 
             if self.callback and not id_conexao.hash() in self.conexoes.keys():
                 self.callback(conexao)
 
-        # FIXME Isso funciona?
         elif id_conexao.hash() in self.conexoes.keys():
             # Passa para a conexão adequada se ela já estiver estabelecida
-
             conexao: tcp.Conexao = self.conexoes[id_conexao.hash()]
-
             conexao._rdt_rcv(seq_no, ack_no, flags, payload)
         else:
             print('%s:%d -> %s:%d (pacote associado a conexão desconhecida)' %
@@ -123,7 +123,7 @@ class Conexao:
     sequence_number: int
     acknowledge_number: int
     id_conexao: IdentificadorConexao
-    asyncio_delay_time: float = 0.1
+    asyncio_delay_time: float = 0.2
 
     # Mantém um timer interno.
     timer = None
@@ -156,6 +156,12 @@ class Conexao:
         print('[{}] timer callback called'.format(datetime.now()))
 
         if self.buffer:
+
+            print(
+                '[LOG] Making a [send] call from _timer_callback. Payload '
+                'length: {}'.format(
+                    len(self.buffer[-1])))
+
             print('Sending the following data (from buffer): {}'.format(
                 self.buffer[-1]))
 
@@ -195,6 +201,9 @@ class Conexao:
         asyncio.get_event_loop().call_later(
             self.asyncio_delay_time, self._timer_callback
         )
+
+        print(' ! Called _rdt_rcv from Conexao with payload length: {}'.format(
+            len(payload)))
 
         # FIXME As flags devem ser tratadas aqui.
 
@@ -389,7 +398,7 @@ class Conexao:
             self.sequence_number = ++self.acknowledge_number
             print(' + Seq number updated to %r' % self.sequence_number)
 
-            print(' /!\\ Appending to buffer: %r' % response)
+            print(' ⚠️ Appending to buffer: %r' % response)
             self.buffer.append(response)
 
             # Inicia o timer (caso isso já não tenha sido feito).
